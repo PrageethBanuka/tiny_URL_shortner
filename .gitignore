@@ -1,0 +1,7 @@
+*.exe
+/gateway/gateway
+/core-api/core-api
+/worker/worker
+go.work
+go.work.sum
+.DS_Store
