@@ -22,6 +22,24 @@ func dsnFromEnv() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, password, host, port, name)
 }
 
+// Middleware to allow cross-origin requests from your frontend
+func corsMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // In production, change "*" to your exact frontend domain
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization")
+
+        // Browsers send a preflight OPTIONS request before the actual request
+        if r.Method == "OPTIONS" {
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+
+        next.ServeHTTP(w, r)
+    })
+}
+
 
 func main() {
 	dsn := dsnFromEnv()
@@ -45,5 +63,5 @@ func main() {
 	mux.HandleFunc("/", withMetrics("/resolve", s.resolveHandler))
 
 	fmt.Println("core-api is listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", corsMiddleware(mux)))
 }
