@@ -51,12 +51,20 @@ func (s *store) close() {
 	s.db.Close()
 }
 
-func (s *store) save(ctx context.Context, code, url string, expiresAt time.Time) error {
-	_, err := s.db.Exec(ctx,
-		`INSERT INTO links (code, url, expires_at) VALUES ($1, $2, $3)`,
-		code, url, expiresAt,
-	)
-	return err
+func (s *store) save(ctx context.Context, code, targetURL string, expiresAt time.Time) error {
+    query := `
+        INSERT INTO links (short_id, url, expires_at) 
+        VALUES ($1, $2, $3)
+    `
+    
+    // Execute the query using the exact Postgres driver syntax
+    _, err := s.db.Exec(ctx, query, code, targetURL, expiresAt)
+    if err != nil {
+        // Return the actual database error so we can read it!
+        return fmt.Errorf("db insert failed: %w", err) 
+    }
+    
+    return nil
 }
 
 func (s *store) resolve(ctx context.Context, code string) (string, error) {

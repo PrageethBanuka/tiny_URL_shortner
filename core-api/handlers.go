@@ -79,9 +79,10 @@ func (s *store) shortenHandler(w http.ResponseWriter, r *http.Request) {
 	expiresAt := time.Now().Add(ttl)
 
 	if err := s.save(r.Context(), code, req.URL, expiresAt); err != nil {
-		http.Error(w, "failed to save link", http.StatusInternalServerError)
-		return
-	}
+        // This will print the EXACT PostgreSQL rejection reason to your browser/curl
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
