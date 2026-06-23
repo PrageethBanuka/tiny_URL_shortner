@@ -1,13 +1,15 @@
 package main
 
 import (
-	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"strings"
 	"time"
+
+	"crypto/rand"
+	"math/big"
 )
 
 type shortenRequest struct {
@@ -26,9 +28,23 @@ func (s *store) healthzHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
+	// Liveness only checks the process itself, not its dependencies —
+	// that distinction is why this one stays a no-op 200, while readyz below doesn't.
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprint(w, "ok")
+}
+
+func (s *store) readyzHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.db.Ping(r.Context()); err != nil {
+		http.Error(w, "database unreachable", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprint(w, "ready")
 }
 
 func (s *store) shortenHandler(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +78,10 @@ func (s *store) shortenHandler(w http.ResponseWriter, r *http.Request) {
 	code := generateCode(6)
 	expiresAt := time.Now().Add(ttl)
 
-	s.mu.Lock()
-	s.links[code] = link{URL: req.URL, ExpiresAt: expiresAt}
-	s.mu.Unlock()
+	if err := s.save(r.Context(), code, req.URL, expiresAt); err != nil {
+		http.Error(w, "failed to save link", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -92,20 +109,33 @@ func (s *store) resolveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	item, ok := s.links[code]
-	if ok && time.Now().After(item.ExpiresAt) {
-		delete(s.links, code)
-		ok = false
-	}
-	s.mu.Unlock()
-
-	if !ok {
+	url, err := s.resolve(r.Context(), code)
+	if errors.Is(err, errNotFound) {
 		http.NotFound(w, r)
 		return
 	}
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
-	http.Redirect(w, r, item.URL, http.StatusFound)
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+func (s *store) cleanupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	purged, err := s.cleanup(r.Context())
+	if err != nil {
+		http.Error(w, "cleanup failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]int{"purged": purged})
 }
 
 func generateCode(length int) string {
@@ -122,23 +152,4 @@ func generateCode(length int) string {
 	}
 
 	return string(result)
-}
-
-func (s *store) readyzHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, "ready")
-}
-
-func (s *store) cleanupHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	purged := s.cleanup()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{"purged": purged})
 }

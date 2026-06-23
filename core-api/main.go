@@ -1,15 +1,27 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-	s := &store{links: make(map[string]link)}
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required, e.g. postgres://postgres:devpassword@localhost:5432/core_api")
+	}
+
+	ctx := context.Background()
+	s, err := newStore(ctx, dsn)
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer s.close()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", withMetrics("/healthz", s.healthzHandler))
