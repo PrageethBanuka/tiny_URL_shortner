@@ -32,9 +32,11 @@ func newStore(ctx context.Context, dsn string) (*store, error) {
     // 3. Auto-Migrate: Ensure the links table exists
     // (Adjust the column names if your shortenHandler uses different ones)
     schema := `
-    CREATE TABLE IF NOT EXISTS links (
+    DROP TABLE IF EXISTS links;
+    CREATE TABLE links (
         short_id VARCHAR(20) PRIMARY KEY,
         url TEXT NOT NULL,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );`
     
