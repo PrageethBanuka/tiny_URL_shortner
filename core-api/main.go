@@ -19,7 +19,7 @@ func dsnFromEnv() string {
 	if host == "" || password == "" {
 		log.Fatal("DB_HOST and DB_PASSWORD are required")
 	}
-	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, name)
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, password, host, port, name)
 }
 
 
