@@ -10,8 +10,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+func dsnFromEnv() string {
+	host := os.Getenv("DB_HOST")
+	port := os.Getenv("DB_PORT")
+	user := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PASSWORD")
+	name := os.Getenv("DB_NAME")
+	if host == "" || password == "" {
+		log.Fatal("DB_HOST and DB_PASSWORD are required")
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, name)
+}
+
+
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := dsnFromEnv()
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is required, e.g. postgres://postgres:devpassword@localhost:5432/core_api")
 	}
