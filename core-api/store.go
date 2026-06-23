@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,14 +18,32 @@ type store struct {
 }
 
 func newStore(ctx context.Context, dsn string) (*store, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := pool.Ping(ctx); err != nil {
-		return nil, err
-	}
-	return &store{db: pool}, nil
+    // 1. Establish the connection pool
+    pool, err := pgxpool.New(ctx, dsn)
+    if err != nil {
+        return nil, fmt.Errorf("unable to connect to database: %w", err)
+    }
+    
+    // 2. Verify the connection
+    if err := pool.Ping(ctx); err != nil {
+        return nil, fmt.Errorf("unable to ping database: %w", err)
+    }
+
+    // 3. Auto-Migrate: Ensure the links table exists
+    // (Adjust the column names if your shortenHandler uses different ones)
+    schema := `
+    CREATE TABLE IF NOT EXISTS links (
+        short_id VARCHAR(20) PRIMARY KEY,
+        url TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`
+    
+    _, err = pool.Exec(ctx, schema)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create database schema: %w", err)
+    }
+
+    return &store{db: pool}, nil
 }
 func (s *store) close() {
 	s.db.Close()
