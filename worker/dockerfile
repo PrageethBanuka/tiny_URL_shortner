@@ -1,0 +1,21 @@
+# Stage 1: Build the native Go binary
+FROM golang:1.26-alpine AS builder
+WORKDIR /app
+
+# Download dependencies first (optimized caching)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the code and compile a statically linked binary
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o cleanup-worker .
+
+# Stage 2: Create the tiny production image
+FROM alpine:latest
+WORKDIR /root/
+
+# Pull in the compiled binary from Stage 1
+COPY --from=builder /app/cleanup-worker .
+
+# When the CronJob spins up, execute this binary
+CMD ["./cleanup-worker"]
