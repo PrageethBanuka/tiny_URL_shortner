@@ -1,52 +1,51 @@
-package worker
+package main
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
-
-	"github.com/jackc/pgx/v5/pgxpool" // Upgraded to v5 to match your core-api
+	"time"
 )
 
 func main() {
-	// 1. Pull the exact same environment variables OpenChoreo injects into your API
-	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PASSWORD")
-	dbname := os.Getenv("DB_NAME")
-	sslmode := os.Getenv("DB_SSLMODE")
+	// Look for the environment variable OpenChoreo creates when you bind the dependency
+	apiHost := os.Getenv("CORE_API_HOST")
+	apiPort := os.Getenv("CORE_API_PORT")
 
-	// Fallbacks just in case you run this locally outside the cluster
-	if host == "" { host = "core-db-postgresql" }
-	if port == "" { port = "5432" }
-	if user == "" { user = "postgres" }
-	if dbname == "" { dbname = "coreapi" }
-	if sslmode == "" { sslmode = "disable" }
-
-	// 2. Construct the exact DSN string your core-api uses
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		user, password, host, port, dbname, sslmode)
-
-	ctx := context.Background()
-
-	// 3. Connect to the pool using pgx/v5
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+	// Fallback to internal Kubernetes DNS if variables aren't set
+	if apiHost == "" {
+		apiHost = "core-api"
 	}
-	defer pool.Close()
-
-	log.Println("CronJob started: Running database optimization...")
-	
-	// 4. Execute the exact cleanup query you wrote in store.go
-	query := `DELETE FROM links WHERE expires_at < NOW()`
-	commandTag, err := pool.Exec(ctx, query)
-	if err != nil {
-		log.Fatalf("Error cleaning up expired links: %v\n", err)
+	if apiPort == "" {
+		apiPort = "8080" // Assuming your core-api runs on 8080
 	}
-	
-	fmt.Printf("Successfully purged %d expired links.\n", commandTag.RowsAffected())
+
+	endpoint := fmt.Sprintf("http://%s:%s/internal/cleanup", apiHost, apiPort)
+	log.Printf("CronJob started: Calling %s...", endpoint)
+
+	// Set a timeout so the worker doesn't hang forever if the API is slow
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// Assuming your /internal/cleanup endpoint uses POST. 
+	// (Change to http.MethodGet if your handler expects a GET request).
+	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	if err != nil {
+		log.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatalf("Error calling core-api cleanup: %v\n", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		log.Fatalf("Cleanup failed with status %d: %s\n", resp.StatusCode, string(body))
+	}
+
+	fmt.Printf("Cleanup request successful: %s\n", string(body))
 	log.Println("CronJob complete. Shutting down gracefully.")
 }
