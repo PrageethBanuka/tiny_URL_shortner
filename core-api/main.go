@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp" // <-- Added OTel HTTP library
 )
 
 func dsnFromEnv() string {
@@ -24,24 +25,35 @@ func dsnFromEnv() string {
 
 // Middleware to allow cross-origin requests from your frontend
 func corsMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // In production, change "*" to your exact frontend domain
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// In production, change "*" to your exact frontend domain
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization, traceparent, tracestate") // Added trace headers for safe propagation
 
-        // Browsers send a preflight OPTIONS request before the actual request
-        if r.Method == "OPTIONS" {
-            w.WriteHeader(http.StatusOK)
-            return
-        }
+		// Browsers send a preflight OPTIONS request before the actual request
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
-        next.ServeHTTP(w, r)
-    })
+		next.ServeHTTP(w, r)
+	})
 }
 
-
 func main() {
+	// --- ADDED: Initialize OpenTelemetry Tracing ---
+	tp, err := InitTracer("core-api")
+	if err != nil {
+		log.Fatalf("Failed to initialize tracing: %v", err)
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down tracer: %v", err)
+		}
+	}()
+	// -----------------------------------------------
+
 	dsn := dsnFromEnv()
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is required, e.g. postgres://postgres:devpassword@localhost:5432/core_api")
@@ -63,5 +75,10 @@ func main() {
 	mux.HandleFunc("/", withMetrics("/resolve", s.resolveHandler))
 
 	fmt.Println("core-api is listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", corsMiddleware(mux)))
+	
+	// --- ADDED: Wrap the mux with OTel middleware ---
+	otelHandler := otelhttp.NewHandler(mux, "core-api-http-server")
+
+	// Wrap the OTel handler with your CORS middleware and serve
+	log.Fatal(http.ListenAndServe(":8080", corsMiddleware(otelHandler)))
 }

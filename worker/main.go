@@ -1,15 +1,31 @@
 package main
 
 import (
+	"context" 
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp" 
 )
 
 func main() {
+	// --- ADDED: Initialize OpenTelemetry Tracing ---
+	tp, err := InitTracer("cleanup-worker")
+	if err != nil {
+		log.Fatalf("Failed to initialize tracing: %v", err)
+	}
+	defer func() {
+		// Ensure traces flush before the cronjob exits
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down tracer: %v", err)
+		}
+	}()
+	// -----------------------------------------------
+
 	// Look for the environment variable OpenChoreo creates when you bind the dependency
 	apiHost := os.Getenv("CORE_API_HOST")
 	apiPort := os.Getenv("CORE_API_PORT")
@@ -19,18 +35,21 @@ func main() {
 		apiHost = "core-api"
 	}
 	if apiPort == "" {
-		apiPort = "8080" // Assuming your core-api runs on 8080
+		apiPort = "8080" 
 	}
 
 	endpoint := fmt.Sprintf("http://%s:%s/internal/cleanup", apiHost, apiPort)
 	log.Printf("CronJob started: Calling %s...", endpoint)
 
-	// Set a timeout so the worker doesn't hang forever if the API is slow
-	client := &http.Client{Timeout: 10 * time.Second}
+	// --- UPDATED: Wrap the HTTP Client Transport with OTel ---
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   10 * time.Second,
+	}
 
-	// Assuming your /internal/cleanup endpoint uses POST. 
-	// (Change to http.MethodGet if your handler expects a GET request).
-	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	// --- UPDATED: Use context to propagate traces ---
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		log.Fatalf("Failed to create request: %v", err)
 	}

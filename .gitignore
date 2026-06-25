@@ -5,3 +5,14 @@
 go.work
 go.work.sum
 .DS_Store
+
+# editor/IDE
+.vscode/
+.idea/
+
+# test artifacts (once you start writing tests)
+*.test
+coverage.out
+
+# local-only env overrides, if you ever add one
+.env
