@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-	// --- ADDED: Initialize OpenTelemetry Tracing ---
 	tp, err := InitTracer("cleanup-worker")
 	if err != nil {
 		log.Fatalf("Failed to initialize tracing: %v", err)
